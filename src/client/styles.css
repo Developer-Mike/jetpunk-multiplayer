@@ -1,3 +1,27 @@
+#room-container {
+  margin: 10px;
+  padding: 10px;
+
+  border: 1px solid #c7ccd1;
+}
+
+#room-container > h3 {  
+  font-size: 2rem;
+}
+
+#room-players {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  grid-gap: 5px;
+
+  margin: 10px 0;
+}
+
+#room-players > div {
+  color: var(--player-color);
+  font-weight: 600;
+}
+
 #start-button-holder {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -5,7 +29,11 @@
 }
 
 .other-player-editing {
-  border: 2px solid var(--player-color);
+  border: 2px solid var(--player-color) !important;
+}
+
+.player-0 {
+  --player-color: blue;
 }
 
 .player-1 {
@@ -13,13 +41,13 @@
 }
 
 .player-2 {
-  --player-color: blue;
-}
-
-.player-3 {
   --player-color: green;
 }
 
+.player-3 {
+  --player-color: orange;
+}
+
 .player-4 {
-  --player-color: yellow;
+  --player-color: purple;
 }

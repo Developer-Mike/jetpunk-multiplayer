@@ -71,7 +71,7 @@ io.on('connection', socket => {
   // Update client
   socket.emit(SocketEvents.S2C.ROOM_JOINED, { room: quizzes[roomId] } as RoomJoinedS2C)
 
-  // Notify other players
+  // Notify all players
   io.to(roomId).emit(SocketEvents.S2C.PLAYER_JOINED, { id, username } as PlayerJoinedS2C)
 
   console.log(`User ${username} (${id}) connected to room ${roomId}`)
@@ -82,7 +82,7 @@ io.on('connection', socket => {
     quizzes[roomId].inGame = true
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.QUIZ_STARTED)
+    socket.to(roomId).emit(SocketEvents.S2C.QUIZ_STARTED)
   })
 
   socket.on(SocketEvents.C2S.CHANGE_FIELD, (msg: ChangeFieldC2S) => {
@@ -91,7 +91,7 @@ io.on('connection', socket => {
     quizzes[roomId].players[id].currentField = msg.fieldId
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.FIELD_CHANGED, { id, fieldId: msg.fieldId } as FieldChangedS2C)
+    socket.to(roomId).emit(SocketEvents.S2C.FIELD_CHANGED, { id, fieldId: msg.fieldId } as FieldChangedS2C)
   })
 
   socket.on(SocketEvents.C2S.CHANGE_INPUT, (msg: ChangeInputC2S) => {
@@ -100,7 +100,7 @@ io.on('connection', socket => {
     quizzes[roomId].players[id].currentAnswer = msg.value
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.INPUT_CHANGED, { id, value: msg.value } as InputChangedS2C)
+    socket.to(roomId).emit(SocketEvents.S2C.INPUT_CHANGED, { id, value: msg.value } as InputChangedS2C)
   })
 
   socket.on(SocketEvents.C2S.SUBMIT_ANSWER, (msg: SubmitAnswerC2S) => {
@@ -113,35 +113,35 @@ io.on('connection', socket => {
     })
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.ANSWER_SUBMITTED, { id, fieldId: msg.fieldId, answer: msg.answer } as AnswerSubmittedS2C)
+    socket.to(roomId).emit(SocketEvents.S2C.ANSWER_SUBMITTED, { id, fieldId: msg.fieldId, answer: msg.answer } as AnswerSubmittedS2C)
   })
 
   socket.on(SocketEvents.C2S.PAUSE_QUIZ, _msg => {
     if (!roomId) return console.log(`${username} is not in a room`)
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.QUIZ_PAUSED)
+    socket.to(roomId).emit(SocketEvents.S2C.QUIZ_PAUSED)
   })
 
   socket.on(SocketEvents.C2S.UNPAUSE_QUIZ, _msg => {
     if (!roomId) return console.log(`${username} is not in a room`)
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.QUIZ_UNPAUSED)
+    socket.to(roomId).emit(SocketEvents.S2C.QUIZ_UNPAUSED)
   })
 
   socket.on(SocketEvents.C2S.UNLIMITED_TIME_ENABLED, _msg => {
     if (!roomId) return console.log(`${username} is not in a room`)
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.ON_UNLIMITED_TIME_ENABLED)
+    socket.to(roomId).emit(SocketEvents.S2C.ON_UNLIMITED_TIME_ENABLED)
   })
 
   socket.on(SocketEvents.C2S.END_QUIZ, _msg => {
     if (!roomId) return console.log(`${username} is not in a room`)
 
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.QUIZ_ENDED)
+    socket.to(roomId).emit(SocketEvents.S2C.QUIZ_ENDED)
   })
 
   socket.on('disconnect', () => {
@@ -154,7 +154,7 @@ io.on('connection', socket => {
     if (Object.values(quizzes[roomId].players).every(player => !player.connected)) delete quizzes[roomId]
     
     // Notify other players
-    io.to(roomId).emit(SocketEvents.S2C.PLAYER_LEFT, { id } as PlayerLeftS2C)
+    socket.to(roomId).emit(SocketEvents.S2C.PLAYER_LEFT, { id } as PlayerLeftS2C)
   })
 })
 

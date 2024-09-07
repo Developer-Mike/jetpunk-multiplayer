@@ -46,16 +46,69 @@ function getPlayerIndex(room: any, id: string) {
 }
 
 function getField(fieldId: string) {
-  return document.querySelector(`*[data-answer="${fieldId}"]`)
+  return document.querySelector(`td > div[data-answer="${fieldId}"]:not(.photo)`)
 }
 
 function getActiveFieldId() {
   return document.querySelector('.highlighted[data-answer]')?.getAttribute('data-answer') || null
 }
 
+function showActiveRoom(roomId: string, room: any) {
+  const roomDivContainer = document.querySelector('.quiz-container') as HTMLElement
+  if (!roomDivContainer) return
+
+  const roomDiv = document.createElement('div')
+  roomDiv.id = 'room-container'
+  roomDivContainer.prepend(roomDiv)
+
+  const roomHeader = document.createElement('h3')
+  roomHeader.textContent = `Room: ${roomId}`
+  roomDiv.appendChild(roomHeader)
+
+  const roomPlayers = document.createElement('div')
+  roomPlayers.id = 'room-players'
+  roomDiv.appendChild(roomPlayers)
+
+  const updatePlayers = () => {
+    roomPlayers.innerHTML = ''
+
+    for (const [id, player] of Object.entries(room.players) as [string, any][]) {
+      if (!player.connected) continue
+
+      const playerDiv = document.createElement('div')
+      playerDiv.classList.add(`player-${getPlayerIndex(room, id)}`)
+      playerDiv.textContent = player.username
+      roomPlayers.appendChild(playerDiv)
+    }
+  }
+
+  updatePlayers()
+  room.players = new Proxy(room.players, {
+    set: (target, prop, value) => {
+      target[prop] = value
+      updatePlayers()
+      return true
+    }
+  })
+
+  const leaveButton = document.createElement('button')
+  leaveButton.classList.add('red')
+  leaveButton.textContent = 'Leave room'
+  leaveButton.onclick = () => {
+    if (!confirm('Are you sure you want to leave the room?')) return
+    window.location.reload()
+  }
+  roomDiv.appendChild(leaveButton)
+}
+
 function setupServerMsgListeners(socket: any, room: any) {
   socket.on('player-joined', (data: { id: string, username: string }) => {
-    room.players[data.id] = { id: data.id, username: data.username }
+    room.players[data.id] = {
+      connected: true,
+      username: data.username, 
+      currentAnswer: '', 
+      currentField: undefined
+    }
   })
 
   socket.on('quiz-started', () => {
@@ -63,12 +116,15 @@ function setupServerMsgListeners(socket: any, room: any) {
 
     const startButton = document.querySelector('#start-button') as HTMLButtonElement
     startButton?.click()
+
+    const activeField = getActiveFieldId()
+    if (activeField) socket.emit('change-field', { fieldId: activeField })
   })
 
   socket.on('field-changed', (data: { id: string, fieldId: string }) => {
+    const oldFieldId = room.players[data.id].currentField
     room.players[data.id].currentField = data.fieldId
 
-    const oldFieldId = room.players[data.id].currentField
     if (oldFieldId !== undefined) {
       const oldField = getField(oldFieldId)
       if (oldField !== null) {
@@ -99,7 +155,9 @@ function setupServerMsgListeners(socket: any, room: any) {
     room.answers.push({ fieldId: data.fieldId, value: data.answer, playerId: data.id })
 
     const input = document.querySelector('#txt-answer-box') as HTMLInputElement
-    if (input === null) return
+    if (!input) return
+
+    const oldFieldId = getActiveFieldId()
     const oldValue = input.value
 
     if (data.fieldId !== undefined) {
@@ -110,9 +168,14 @@ function setupServerMsgListeners(socket: any, room: any) {
     input.value = data.answer
     input.dispatchEvent(new Event('input'))
 
-    if (data.fieldId !== undefined) {
-      const oldField = getField(room.players[data.id].currentField) as HTMLElement
-      oldField?.click()
+    // Restore position
+    if (data.fieldId !== undefined && oldFieldId !== null) {
+      // Player was on the same field
+      if (oldFieldId === data.fieldId) socket.emit('change-field', { fieldId: getActiveFieldId() })
+      else {
+        const oldField = getField(oldFieldId) as HTMLElement
+        oldField?.click()
+      }
     }
 
     input.value = oldValue
@@ -145,13 +208,17 @@ function setupServerMsgListeners(socket: any, room: any) {
   })
 
   socket.on('player-left', (data: { id: string }) => {
-    room.players[data.id].connected = false
+    room.players[data.id] = {
+      ...room.players[data.id],
+      connected: false
+    }
   })
 }
 
 function setupUserEventListeners(socket: any) {
   let currentField: string | null = getActiveFieldId()
   let currentAnswer: string = (document.querySelector('#txt-answer-box') as HTMLInputElement).value
+  let lastKey: string = '' // Because correct answer is submitted on keyup
 
   const startButton = document.querySelector('#start-button') as HTMLButtonElement
   startButton?.addEventListener('click', e => {
@@ -161,7 +228,7 @@ function setupUserEventListeners(socket: any) {
   })
 
   if (currentField) {
-    const fieldElements = document.querySelectorAll('*[data-answer]')
+    const fieldElements = document.querySelectorAll('td > div[data-answer]:not(.photo)')
     fieldElements.forEach(field => {
       field.addEventListener('click', e => {
         if (!e.isTrusted) return // Ignore programmatic clicks
@@ -181,10 +248,13 @@ function setupUserEventListeners(socket: any) {
     currentAnswer = input.value
     socket.emit('change-input', { value: input.value })
   })
+  input.addEventListener('keydown', e => lastKey = e.key)
 
   const numGuessedDiv = document.querySelector('#num-guessed') as HTMLElement
   new MutationObserver(() => {
-    socket.emit('submit-answer', { fieldId: currentField, answer: currentAnswer })
+    if (currentAnswer === '') return // Caused by programmatic input
+
+    socket.emit('submit-answer', { fieldId: currentField, answer: currentAnswer + lastKey })
 
     // Reset current field and answer
     currentField = getActiveFieldId()
@@ -235,10 +305,13 @@ function multiplayer(onSuccess?: () => void) {
   let room = {
     inGame: false,
     players: {} as any,
+    quizUrl: window.location.pathname,
     answers: [] as any,
   } as any
+
+  showActiveRoom(roomId, room)
   
-  const socket = io("SERVER_URL", { query: { id: getId(), username: getUsername(), quizUrl: window.location.pathname, roomId } })
+  const socket = io("SERVER_URL", { query: { id: getId(), username: getUsername(), quizUrl: room.quizUrl, roomId } })
 
   // Listeners
   socket.on('connect', () => {
@@ -247,8 +320,12 @@ function multiplayer(onSuccess?: () => void) {
     })
     
     socket.on('room-joined', (data: { room: any }) => {
-      room = data.room
-      console.log('Room joined', room)
+      // Update room without loosing proxy
+      room.inGame = data.room.inGame
+      for (const [id, player] of Object.entries(data.room.players) as [string, any][]) {
+        room.players[id] = player
+      }
+      
       onSuccess?.()
     })
 
