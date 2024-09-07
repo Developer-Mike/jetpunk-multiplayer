@@ -9,7 +9,8 @@
     "socket.io": "^4.7.5"
   },
   "scripts": {
-    "dev": "npx tsc-watch --onsuccess ./post-build.bat",
-    "serve": "npx tsc && post-build.bat"
+    "dev": "npx tsc-watch --onsuccess \"cmd /c 'post-build.bat && node dist/index.js'\"",
+    "build": "npx tsc && post-build.bat",
+    "start": "node dist/index.js"
   }
 }
