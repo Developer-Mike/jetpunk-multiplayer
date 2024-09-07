@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "npx tsc-watch --onsuccess \"cmd /c 'post-build.bat && node dist/index.js'\"",
-    "build": "npx tsc && post-build.bat",
+    "build": "npx tsc && cp ./src/client/styles.css ./dist/client/styles.css",
     "start": "node dist/index.js"
   }
 }
