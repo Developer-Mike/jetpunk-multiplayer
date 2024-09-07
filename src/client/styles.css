@@ -1,0 +1,25 @@
+#start-button-holder {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: flex-start;
+}
+
+.other-player-editing {
+  border: 2px solid var(--player-color);
+}
+
+.player-1 {
+  --player-color: red;
+}
+
+.player-2 {
+  --player-color: blue;
+}
+
+.player-3 {
+  --player-color: green;
+}
+
+.player-4 {
+  --player-color: yellow;
+}
