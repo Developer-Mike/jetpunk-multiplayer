@@ -4,10 +4,12 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
   },
   "scripts": {
-    "dev": "npx tsc-watch --onsuccess ./post-build.bat"
+    "dev": "npx tsc-watch --onsuccess ./post-build.bat",
+    "serve": "npx tsc && post-build.bat"
   }
 }

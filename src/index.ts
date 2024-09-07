@@ -6,6 +6,9 @@ import path from 'path'
 import QuizRoom, { Player } from './types/quiz-room'
 import { SubmitAnswerC2S, AnswerSubmittedS2C, ChangeFieldC2S, FieldChangedS2C, ChangeInputC2S, InputChangedS2C, JoinRoomC2S, PlayerJoinedS2C, RoomJoinedS2C, SocketEvents, PlayerLeftS2C, WrongQuizUrlS2C } from './types/socket-types'
 
+import { config as configDotenv } from 'dotenv'
+configDotenv()
+
 const app = express()
 const server = createServer(app)
 const io = new Server(server, { cors: { origin: '*' } })
@@ -18,7 +21,7 @@ app.get('/client/index.user.js', (_req: any, res: any) => {
     if (err) return console.log(err)
 
     res.setHeader('Content-Type', 'text/javascript')
-    res.send(data.replace(/SERVER_URL/g, 'http://localhost:3000'))
+    res.send(data.replace(/SERVER_URL/g, process.env.SERVER_URL || 'http://localhost:3000'))
   })
 })
 
@@ -158,6 +161,6 @@ io.on('connection', socket => {
   })
 })
 
-server.listen(3000, () => {
-  console.log('Listening on *:3000')
+server.listen(process.env.SERVER_PORT, () => {
+  console.log(`listening on *:${process.env.SERVER_PORT}`)
 })
