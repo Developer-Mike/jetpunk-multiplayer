@@ -85,7 +85,7 @@ io.on('connection', socket => {
     quizzes[roomId].inGame = true
 
     // Notify other players
-    socket.to(roomId).emit(SocketEvents.S2C.QUIZ_STARTED)
+    io.to(roomId).emit(SocketEvents.S2C.QUIZ_STARTED)
   })
 
   socket.on(SocketEvents.C2S.CHANGE_FIELD, (msg: ChangeFieldC2S) => {
