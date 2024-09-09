@@ -1,7 +1,7 @@
 # Jetpunk Multiplayer
 
 <h3 align="center">
-    <img alt="Logo" src="./assets/icon.svg" width="100">
+    <img alt="Icon" src="./assets/icon.svg" width="100">
     <br/><br/>
     The Multiplayer Plugin for <a href="https://www.jetpunk.com">JetPunk</a> using <a href="https://tampermonkey.net/">Tampermonkey</a>
 </h3>

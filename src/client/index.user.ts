@@ -120,12 +120,13 @@ function setupServerMsgListeners(socket: any, room: any) {
   })
 
   socket.on('field-changed', (data: { id: string, fieldId: string }) => {
+    console.log(`Field change received: ${data.fieldId}`)
     const oldFieldId = room.players[data.id].currentField
     room.players[data.id].currentField = data.fieldId
 
-    if (oldFieldId !== undefined) {
+    if (oldFieldId) {
       const oldField = getField(oldFieldId)
-      if (oldField !== null) {
+      if (oldField) {
         oldField.classList.remove('other-player-editing')
 
         if (!oldField.classList.contains('correct')) {
@@ -136,13 +137,14 @@ function setupServerMsgListeners(socket: any, room: any) {
     }
 
     const newField = getField(data.fieldId)
-    if (newField !== null) {
+    if (newField) {
       newField.classList.add(`player-${getPlayerIndex(room, data.id)}`)
       newField.classList.add('other-player-editing')
     }
   })
 
   socket.on('input-changed', (data: { id: string, value: string }) => {
+    console.log(`Input change received: ${data.value}`)
     room.players[data.id].currentAnswer = data.value
 
     const field = getField(room.players[data.id].currentField)
@@ -150,6 +152,7 @@ function setupServerMsgListeners(socket: any, room: any) {
   })
 
   socket.on('answer-submitted', (data: { id: string, fieldId: string | undefined, answer: string }) => {
+    console.log(`Answer received: ${data.answer}`)
     room.answers.push({ fieldId: data.fieldId, value: data.answer, playerId: data.id })
 
     const input = document.querySelector('#txt-answer-box') as HTMLInputElement
@@ -171,6 +174,7 @@ function setupServerMsgListeners(socket: any, room: any) {
     input.value = data.answer
     input.dispatchEvent(new Event('input'))
     input.dataset.isMultiplayer = 'false'
+    console.log(`Answer entered: ${data.answer}`)
 
     // Restore position
     if (data.fieldId && oldFieldId) {
@@ -223,6 +227,7 @@ function setupServerMsgListeners(socket: any, room: any) {
 
 function setupUserEventListeners(socket: any, room: any) {
   let currentAnswer: string = (document.querySelector('#txt-answer-box') as HTMLInputElement).value
+  let lastFieldId: string | null = getActiveFieldId()
   room.players[getId()].currentField = getActiveFieldId()
 
   const startButton = document.querySelector('#start-button') as HTMLButtonElement
@@ -235,14 +240,18 @@ function setupUserEventListeners(socket: any, room: any) {
   if (room.players[getId()].currentField) {
     const fieldElements = document.querySelectorAll('td > div[data-answer]:not(.photo)')
     fieldElements.forEach(field => {
-      field.addEventListener('click', e => {
-        if (!e.isTrusted) return // Ignore programmatic clicks
-  
-        const fieldId = field.getAttribute('data-answer')
-  
+      new MutationObserver(() => {
+        if (!field.classList.contains('highlighted')) return
+
+        const fieldId = getActiveFieldId()
+        if (room.players[getId()].currentField === fieldId) return
+
+        lastFieldId = room.players[getId()].currentField
+
         room.players[getId()].currentField = fieldId
+        console.log(`Field changed to: ${fieldId}`)
         socket.emit('change-field', { fieldId })
-      })
+      }).observe(field, { attributes: true, attributeFilter: ['class'] })
     })
   }
 
@@ -250,31 +259,29 @@ function setupUserEventListeners(socket: any, room: any) {
   input.addEventListener('input', e => {
     if (!e.isTrusted) return // Ignore programmatic input
   })
+  const updateInput = (e: KeyboardEvent | ClipboardEvent) => {
+    const futureInputValue = predictInputValue(e)
+    currentAnswer = futureInputValue.length > 0 ? futureInputValue : currentAnswer
+
+    console.log(`Input changed to: ${futureInputValue}`)
+    socket.emit('change-input', { value: futureInputValue })
+  }
   input.addEventListener('keydown', e => {
     if (!e.isTrusted) return // Ignore programmatic input
-    
-    // Prevent currentAnswer from being emptied before submitting
-    const futureInputValue = predictInputValue(e) ?? ''
-    currentAnswer = futureInputValue.length > 0 ? futureInputValue : currentAnswer
-    socket.emit('change-input', { value: input.value })
+    updateInput(e)
   })
   input.addEventListener('paste', e => {
     if (!e.isTrusted) return // Ignore programmatic input
-
-    currentAnswer = e.clipboardData?.getData('text/plain') ?? currentAnswer
-    socket.emit('change-input', { value: currentAnswer })
+    updateInput(e)
   })
 
   const numGuessedDiv = document.querySelector('#num-guessed') as HTMLElement
   new MutationObserver(() => {
     if (input.dataset.isMultiplayer === 'true') return // Caused by programmatic input
 
-    socket.emit('submit-answer', { fieldId: room.players[getId()].currentField, answer: currentAnswer })
-    room.answers.push({ fieldId: room.players[getId()].currentField, value: currentAnswer, playerId: getId() })
-
-    // Reset current field and answer
-    room.players[getId()].currentField = getActiveFieldId()
-    socket.emit('change-field', { fieldId: room.players[getId()].currentField })
+    console.log(`Answer submitted: ${currentAnswer}`)
+    socket.emit('submit-answer', { fieldId: lastFieldId, answer: currentAnswer })
+    room.answers.push({ fieldId: lastFieldId, value: currentAnswer, playerId: getId() })
 
     currentAnswer = ''
     socket.emit('change-input', { value: currentAnswer })
@@ -388,81 +395,43 @@ function injectQuizPage() {
     } // TODO: Add join room button to homepage
 })()
 
-// Predict input value from  wojtekmaj/predict-input-value
-const excludeList = [
-  'Alt',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-  'ArrowUp',
-  'Enter',
-  'Escape',
-  'Shift',
-  'Tab',
-]
-
-/**
- * Predicts what the value will be after the next keyup given keydown event.
- *
- * @param {KeyboardEvent} event Keydown event
- * @returns {string} Predicted input value
- */
-function predictInputValue(event: KeyboardEvent): string | null {
-  // Support only keydown and keypress event
-  if (event.type !== 'keydown' && event.type !== 'keypress') {
-    return null
-  }
-
-  // Skip Cmd+A and other key combinations
-  if (event.metaKey) {
-    return null
-  }
-
-  if (excludeList.includes(event.key)) {
-    return null
-  }
-
-  const { target: element } = event
+// Predict input value inspired by wojtekmaj/predict-input-value (MIT License, Modified)
+const excludeList = ['Alt', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Enter', 'Escape', 'Shift', 'Tab']
+function predictInputValue(event: KeyboardEvent | ClipboardEvent) {
+  const target = event.target as HTMLElement
 
   // Only support input and textarea elements
-  if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) {
-    return null
+  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement))
+    return ''
+
+  const currentValue = target.value
+  if (target.selectionStart === null || target.selectionEnd === null) return currentValue
+
+  if (event instanceof ClipboardEvent) {
+    if (event.type !== 'paste') return currentValue
+
+    let nextValue = currentValue.split('')
+    const clipboardData = event.clipboardData
+    return nextValue.slice(0, target.selectionStart).concat(clipboardData?.getData('text/plain')?.split('') || [], nextValue.slice(target.selectionEnd)).join('')
   }
 
-  // We can’t predict values in number inputs
-  if (element.type === 'number') {
-    return null
-  }
+  if (excludeList.includes(event.key)) return currentValue
+  if (event.type !== 'keydown' && event.type !== 'keypress') return currentValue
 
-  let { selectionStart } = element
-  const { selectionEnd } = element
-
-  if (selectionStart === null || selectionEnd === null) {
-    return null
-  }
-
-  const nextValueArr = element.value.split('')
-  let { key: replaceWith } = event
+  const nextValueArr = currentValue.split('')
 
   if (event.key === 'Backspace') {
-    if (selectionStart && selectionStart === selectionEnd) {
-      /**
-       * There’s no text selected, so pressing backspace will remove the character before the caret.
-       * That’s equal to one character before the caret being selected when Backspace is pressed.
-       */
-      selectionStart -= 1
-    }
-    replaceWith = ''
-  }
-
-  /**
-   * If we’re going to add another character, check if we’re not going over the limit set by
-   * maxLength. If so, entering the next character will fail, and thus, nextValue will be equal to
-   * value.
-   */
-  if (!replaceWith || element.maxLength < 0 || nextValueArr.length < element.maxLength) {
-    nextValueArr.splice(selectionStart, selectionEnd - selectionStart, replaceWith)
-  }
+    if (target.selectionStart === target.selectionEnd) nextValueArr.splice(target.selectionStart - 1, 1)
+    else nextValueArr.splice(target.selectionStart, target.selectionEnd - target.selectionStart)
+  } else if (event.key === 'Delete') {
+    if (target.selectionStart === target.selectionEnd) nextValueArr.splice(target.selectionStart, 1)
+    else nextValueArr.splice(target.selectionStart, target.selectionEnd - target.selectionStart)
+  } else if ((event.ctrlKey || event.metaKey) && event.key === 'c') 
+    return currentValue
+  else if ((event.ctrlKey || event.metaKey) && event.key === 'x') 
+    nextValueArr.splice(target.selectionStart, target.selectionEnd - target.selectionStart)
+  else if (!event.ctrlKey && !event.metaKey && target.maxLength < 0 || nextValueArr.length < target.maxLength)
+    nextValueArr.splice(target.selectionStart, target.selectionEnd - target.selectionStart, event.key)
 
   return nextValueArr.join('')
 }
