@@ -26,4 +26,4 @@
     - https://www.jetpunk.com/quizzes/flags-of-the-world-quiz
 
 ## Screenshots
-<video width="100%" src="./assets/screenshots/screenrecording.mp4" type="video/mp4" controls></video>
+![Screen Recording](./assets/screenshots/screenrecording.mp4)
