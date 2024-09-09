@@ -167,8 +167,10 @@ function setupServerMsgListeners(socket: any, room: any) {
       field.classList.add('other-player-answered')
     }
 
+    input.dataset.isMultiplayer = 'true'
     input.value = data.answer
     input.dispatchEvent(new Event('input'))
+    input.dataset.isMultiplayer = 'false'
 
     // Restore position
     if (data.fieldId && oldFieldId) {
@@ -221,7 +223,6 @@ function setupServerMsgListeners(socket: any, room: any) {
 
 function setupUserEventListeners(socket: any, room: any) {
   let currentAnswer: string = (document.querySelector('#txt-answer-box') as HTMLInputElement).value
-  let lastKey: string = '' // Because correct answer is submitted on keyup
   room.players[getId()].currentField = getActiveFieldId()
 
   const startButton = document.querySelector('#start-button') as HTMLButtonElement
@@ -248,25 +249,27 @@ function setupUserEventListeners(socket: any, room: any) {
   const input = document.querySelector('#txt-answer-box') as HTMLInputElement
   input.addEventListener('input', e => {
     if (!e.isTrusted) return // Ignore programmatic input
-
-    currentAnswer = input.value
+  })
+  input.addEventListener('keydown', e => {
+    if (!e.isTrusted) return // Ignore programmatic input
+    
+    // Prevent currentAnswer from being emptied before submitting
+    currentAnswer = input.value.length > 0 ? input.value : currentAnswer
     socket.emit('change-input', { value: input.value })
   })
-  input.addEventListener('keydown', e => lastKey = e.key)
   input.addEventListener('paste', e => {
     if (!e.isTrusted) return // Ignore programmatic input
 
-    lastKey = ''
     currentAnswer = e.clipboardData?.getData('text/plain') ?? currentAnswer
     socket.emit('change-input', { value: currentAnswer })
   })
 
   const numGuessedDiv = document.querySelector('#num-guessed') as HTMLElement
   new MutationObserver(() => {
-    if (currentAnswer === '') return // Caused by programmatic input
+    if (input.dataset.isMultiplayer === 'true') return // Caused by programmatic input
 
-    socket.emit('submit-answer', { fieldId: room.players[getId()].currentField, answer: currentAnswer + lastKey })
-    room.answers.push({ fieldId: room.players[getId()].currentField, value: currentAnswer + lastKey, playerId: getId() })
+    socket.emit('submit-answer', { fieldId: room.players[getId()].currentField, answer: currentAnswer })
+    room.answers.push({ fieldId: room.players[getId()].currentField, value: currentAnswer, playerId: getId() })
 
     // Reset current field and answer
     room.players[getId()].currentField = getActiveFieldId()
@@ -381,5 +384,5 @@ function injectQuizPage() {
     if (window.location.pathname.match(/\/quizzes\/[a-z0-9-]+$/) || window.location.pathname.match(/\/user-quizzes\/\d+\/[a-z0-9-]+$/)) {
       const multiplayerButton = injectQuizPage()
       if (localStorage.getItem('auto-join-room') !== null) multiplayerButton.click() // Auto-join room
-    }
+    } // TODO: Add join room button to homepage
 })()
