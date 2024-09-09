@@ -254,7 +254,8 @@ function setupUserEventListeners(socket: any, room: any) {
     if (!e.isTrusted) return // Ignore programmatic input
     
     // Prevent currentAnswer from being emptied before submitting
-    currentAnswer = input.value.length > 0 ? input.value : currentAnswer
+    const futureInputValue = predictInputValue(e) ?? ''
+    currentAnswer = futureInputValue.length > 0 ? futureInputValue : currentAnswer
     socket.emit('change-input', { value: input.value })
   })
   input.addEventListener('paste', e => {
@@ -386,3 +387,82 @@ function injectQuizPage() {
       if (localStorage.getItem('auto-join-room') !== null) multiplayerButton.click() // Auto-join room
     } // TODO: Add join room button to homepage
 })()
+
+// Predict input value from  wojtekmaj/predict-input-value
+const excludeList = [
+  'Alt',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'Enter',
+  'Escape',
+  'Shift',
+  'Tab',
+]
+
+/**
+ * Predicts what the value will be after the next keyup given keydown event.
+ *
+ * @param {KeyboardEvent} event Keydown event
+ * @returns {string} Predicted input value
+ */
+function predictInputValue(event: KeyboardEvent): string | null {
+  // Support only keydown and keypress event
+  if (event.type !== 'keydown' && event.type !== 'keypress') {
+    return null
+  }
+
+  // Skip Cmd+A and other key combinations
+  if (event.metaKey) {
+    return null
+  }
+
+  if (excludeList.includes(event.key)) {
+    return null
+  }
+
+  const { target: element } = event
+
+  // Only support input and textarea elements
+  if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) {
+    return null
+  }
+
+  // We can’t predict values in number inputs
+  if (element.type === 'number') {
+    return null
+  }
+
+  let { selectionStart } = element
+  const { selectionEnd } = element
+
+  if (selectionStart === null || selectionEnd === null) {
+    return null
+  }
+
+  const nextValueArr = element.value.split('')
+  let { key: replaceWith } = event
+
+  if (event.key === 'Backspace') {
+    if (selectionStart && selectionStart === selectionEnd) {
+      /**
+       * There’s no text selected, so pressing backspace will remove the character before the caret.
+       * That’s equal to one character before the caret being selected when Backspace is pressed.
+       */
+      selectionStart -= 1
+    }
+    replaceWith = ''
+  }
+
+  /**
+   * If we’re going to add another character, check if we’re not going over the limit set by
+   * maxLength. If so, entering the next character will fail, and thus, nextValue will be equal to
+   * value.
+   */
+  if (!replaceWith || element.maxLength < 0 || nextValueArr.length < element.maxLength) {
+    nextValueArr.splice(selectionStart, selectionEnd - selectionStart, replaceWith)
+  }
+
+  return nextValueArr.join('')
+}
