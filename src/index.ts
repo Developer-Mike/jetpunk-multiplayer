@@ -4,7 +4,7 @@ import { Server } from 'socket.io'
 import fs from 'fs'
 import path from 'path'
 import QuizRoom, { Player } from './types/quiz-room'
-import { SubmitAnswerC2S, AnswerSubmittedS2C, ChangeFieldC2S, FieldChangedS2C, ChangeInputC2S, InputChangedS2C, JoinRoomC2S, PlayerJoinedS2C, RoomJoinedS2C, SocketEvents, PlayerLeftS2C, WrongQuizUrlS2C } from './types/socket-types'
+import { SubmitAnswerC2S, AnswerSubmittedS2C, ChangeFieldC2S, FieldChangedS2C, ChangeInputC2S, InputChangedS2C, PlayerJoinedS2C, RoomJoinedS2C, SocketEvents, PlayerLeftS2C, WrongQuizUrlS2C } from './types/socket-types'
 
 import { config as configDotenv } from 'dotenv'
 configDotenv()
@@ -14,6 +14,19 @@ const server = createServer(app)
 const io = new Server(server, { cors: { origin: '*' } })
 
 const quizzes: { [id: string]: QuizRoom } = {}
+
+// Serve public files
+app.use(express.static('public'))
+
+// Serve /join-room/<ROOM-ID> page
+app.get('/join-room/:roomId', (req: any, res: any) => {
+  const roomId = req.params.roomId
+
+  fs.readFile(path.join(__dirname, 'pages/join-room.html'), 'utf8', (err, data) => {
+    if (err) return console.log(err)
+    res.send(data.replace(/ROOM_ID/g, roomId))
+  })
+})
 
 // Serve client files
 app.get('/client/index.user.js', (_req: any, res: any) => {
@@ -45,6 +58,10 @@ io.use((socket, next) => {
   if (quizzes[roomId]?.inGame) return next(new Error('Room is already in a game'))
 
   next()
+})
+
+server.listen(process.env.SERVER_PORT, () => {
+  console.log(`listening on *:${process.env.SERVER_PORT}`)
 })
 
 // Handle socket events
@@ -159,8 +176,4 @@ io.on('connection', socket => {
     // Notify other players
     socket.to(roomId).emit(SocketEvents.S2C.PLAYER_LEFT, { id } as PlayerLeftS2C)
   })
-})
-
-server.listen(process.env.SERVER_PORT, () => {
-  console.log(`listening on *:${process.env.SERVER_PORT}`)
 })

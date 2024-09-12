@@ -1,7 +1,7 @@
 @echo off
 
-REM Copy the styles.css file to the dist folder
-copy .\src\client\styles.css .\dist\client\styles.css
+REM Copy all remaining files from .\src to .\dist
+xcopy .\src .\dist /E /Y /I
 
 REM Make tampermonkey script variant with filled placeholders
 REM Read .\dist\client\index.user.js, Replace SERVER_URL with http://localhost:3000", Save to .\dist\client\index.hr.user.js

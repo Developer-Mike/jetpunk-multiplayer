@@ -4,18 +4,21 @@
 // @version      1.0
 // @description  Play Jetpunk quizzes together with your friends
 // @author       Developer-Mike
-// @match        https://www.jetpunk.com/*
 // @icon         https://www.jetpunk.com/apple-touch-icon-152x152.png
+// @match        https://www.jetpunk.com/*
+// @match        SERVER_URL/join-room/*
 // @updateURL    SERVER_URL/client/index.user.js
 // @downloadURL  SERVER_URL/client/index.user.js
 // @require      SERVER_URL/socket.io/socket.io.js
 // @resource css SERVER_URL/client/styles.css
+// @grant        unsafeWindow
 // @grant        GM_getResourceText
 // @grant        GM_addStyle
 // @run-at       document-end
 // ==/UserScript==
 
 declare var io: (...params: any) => any
+declare var unsafeWindow: any
 declare var GM_getResourceText: (id: string) => string
 declare var GM_addStyle: (css: string) => void
 
@@ -321,7 +324,7 @@ function setupUserEventListeners(socket: any, room: any) {
   }).observe(timer, { childList: true })
 }
 
-function multiplayer(onSuccess?: () => void) {
+function multiplayer(onlyRedirect: boolean, onSuccess?: () => void) {
   const roomId = localStorage.getItem('auto-join-room') ?? prompt('Enter room ID')
   if (roomId === null) return
 
@@ -342,6 +345,9 @@ function multiplayer(onSuccess?: () => void) {
     socket.on('room-joined', (data: { room: any }) => {
       // Remove auto-join room
       localStorage.removeItem('auto-join-room')
+
+      // Don't allow room creation if it's not allowed
+      if (!onlyRedirect) return socket.disconnect()
 
       // Update room without loosing proxy
       for (const [id, player] of Object.entries(data.room.players) as [string, any][]) {
@@ -364,7 +370,7 @@ function injectQuizPage() {
   const multiplayerButton = document.createElement('button')
   multiplayerButton.id = 'start-button'
   multiplayerButton.classList.add('green')
-  multiplayerButton.onclick = () => multiplayer(() => {
+  multiplayerButton.onclick = () => multiplayer(true, () => {
     multiplayerButton.remove()
     startButton?.querySelector('i')?.classList?.replace('bi-play-fill', 'bi-cloud-fill')
   })
@@ -382,8 +388,32 @@ function injectQuizPage() {
   return multiplayerButton
 }
 
+function injectHomePage() {
+  const multiplayerButton = document.createElement('button')
+  multiplayerButton.classList.add('green')
+  multiplayerButton.style.marginTop = '20px'
+  multiplayerButton.onclick = () => multiplayer(false)
+
+  const buttonSpan = document.createElement('span')
+  buttonSpan.textContent = 'Join room'
+  multiplayerButton.appendChild(buttonSpan)
+
+  const buttonIcon = document.createElement('i')
+  buttonIcon.classList.add('bi', 'bi-cloud-fill')
+  multiplayerButton.appendChild(buttonIcon)
+
+  const dailyQuizzesContainer = document.querySelector('.date') as HTMLElement
+  dailyQuizzesContainer?.prepend(multiplayerButton)
+}
+
 (function() {
     'use strict'
+
+    // If on SERVER_URL/join-room/*
+    if (window.location.hostname === 'SERVER_URL'.split('//').pop()?.split(':').shift()?.split('/').pop()) {
+      unsafeWindow.isExtensionInstalled = true
+      return
+    }
 
     const css = GM_getResourceText('css')
     GM_addStyle(css)
@@ -392,7 +422,14 @@ function injectQuizPage() {
     if (window.location.pathname.match(/\/quizzes\/[a-z0-9-]+$/) || window.location.pathname.match(/\/user-quizzes\/\d+\/[a-z0-9-]+$/)) {
       const multiplayerButton = injectQuizPage()
       if (localStorage.getItem('auto-join-room') !== null) multiplayerButton.click() // Auto-join room
-    } // TODO: Add join room button to homepage
+    } else if (window.location.pathname.match(/\/([a-z]{2})?$/)) injectHomePage()
+    else if (window.location.pathname.match(/\/join-room\/[^\/]+$/)) {
+      const roomId = window.location.pathname.split('/').pop()
+      if (!roomId) return
+
+      localStorage.setItem('auto-join-room', roomId)
+      multiplayer(false)
+    }
 })()
 
 // Predict input value inspired by wojtekmaj/predict-input-value (MIT License, Modified)

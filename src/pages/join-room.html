@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Join Room</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <main>
+        <h1>Install JetPunk Multiplayer</h1>
+        <p>Follow the steps below to install the JetPunk Multiplayer script (You only need to do this once)</p>
+
+        <ul>
+            <li>
+                Install the "Tampermonkey" or "Userscripts" extension by clicking the button below
+                <a id="install-extension" target="_blank"><button>Install Extension</button></a>
+            </li>
+            <li>
+                Install the JetPunk multiplayer script by clicking the button below
+                <a href="/client/index.user.js"><button>Install Script</button></a>
+            </li>
+            <li>
+                Refresh the page or click the button below to join the room
+                <a href="https://jetpunk.com/join-room/ROOM_ID"><button>Join Room</button></a>
+            </li>
+        </ul>
+    </main>
+
+    <script>
+        const INSTALLATION_LINKS = {
+            "firefox": "https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/",
+            "edge": "https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd",
+            "chrome": "https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo",
+            "opera": "https://addons.opera.com/en/extensions/details/tampermonkey-beta/",
+            "safari": "https://apps.apple.com/us/app/userscripts/id1463298887"
+        }
+
+        const userAgent = window.navigator.userAgent.toLowerCase()
+        const browser = userAgent.includes("edg") ? "edge" : 
+            userAgent.includes("opr") ? "opera" : 
+            userAgent.includes("chrome") ? "chrome" : 
+            userAgent.includes("safari") ? "safari" : 
+            "firefox"
+
+        document.getElementById("install-extension").href = INSTALLATION_LINKS[browser]
+
+        setTimeout(() => {
+            if (!window.isExtensionInstalled) return
+            open("https://jetpunk.com/join-room/ROOM_ID", "_self")
+        }, 100)
+    </script>
+</body>
+</html>
