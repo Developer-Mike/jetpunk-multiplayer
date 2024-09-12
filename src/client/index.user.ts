@@ -64,6 +64,17 @@ function showActiveRoom(roomId: string, room: any) {
   roomDiv.id = 'room-container'
   roomDivContainer.prepend(roomDiv)
 
+  const shareButton = document.createElement('i')
+  shareButton.id = 'share-button'
+  shareButton.classList.add('bi', 'bi-share-fill')
+  // copy room ID to clipboard
+  shareButton.onclick = () => {
+    navigator.clipboard.writeText(`SERVER_URL/join-room/${roomId}`)
+    shareButton.classList.replace('bi-share-fill', 'bi-check2')
+    setTimeout(() => shareButton.classList.replace('bi-check2', 'bi-share-fill'), 500)
+  }
+  roomDiv.appendChild(shareButton)
+
   const roomHeader = document.createElement('h3')
   roomHeader.textContent = `Room: ${roomId}`
   roomDiv.appendChild(roomHeader)
