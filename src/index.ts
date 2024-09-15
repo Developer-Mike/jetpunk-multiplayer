@@ -9,6 +9,8 @@ import { SubmitAnswerC2S, AnswerSubmittedS2C, ChangeFieldC2S, FieldChangedS2C, C
 import { config as configDotenv } from 'dotenv'
 configDotenv()
 
+const VERSION_NUMBER = '1.1'
+
 const app = express()
 const server = createServer(app)
 const io = new Server(server, { cors: { origin: '*' } })
@@ -26,7 +28,7 @@ app.get('/join-room/:roomId', (req: any, res: any) => {
     if (err) return console.log(err)
     res.send(data
       .replace(/ROOM_ID/g, roomId)
-      .replace(/VERSION_NUMBER/g, process.env.VERSION_NUMBER || '0.0.0')
+      .replace(/VERSION_NUMBER/g, VERSION_NUMBER)
     )
   })
 })
@@ -39,7 +41,7 @@ app.get('/client/index.user.js', (_req: any, res: any) => {
     res.setHeader('Content-Type', 'text/javascript')
     res.send(data
       .replace(/SERVER_URL/g, process.env.SERVER_URL || 'http://localhost:3000')
-      .replace(/VERSION_NUMBER/g, process.env.VERSION_NUMBER || '0.0.0')
+      .replace(/VERSION_NUMBER/g, VERSION_NUMBER)
     )
   })
 })

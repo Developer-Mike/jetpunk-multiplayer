@@ -398,7 +398,10 @@ function joinRoom(roomId: string | null, onlyJoin = false) {
     
     socket.on('room-joined', (data: { newRoom: boolean, room: any }) => {
       // Don't allow room creation if it's not allowed
-      if (onlyJoin && data.newRoom) return socket.disconnect()
+      if (onlyJoin && data.newRoom) {
+        localStorage.removeItem(ROOM_ID_KEY)
+        return socket.disconnect()
+      }
 
       // Update room without loosing proxy
       for (const [id, player] of Object.entries(data.room.players) as [string, any][]) {
