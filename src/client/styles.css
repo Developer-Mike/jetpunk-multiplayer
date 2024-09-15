@@ -1,3 +1,19 @@
+#join-room-button, #leave-room-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 180px;
+  margin-top: 20px;
+  padding: 6px 10px;
+
+  font-size: 18px;
+}
+
+#join-room-button > i {
+  transform: translate(10px, 2px) scale(1.35);
+}
+
 #room-container {
   position: relative;
 
@@ -40,12 +56,27 @@
   align-items: flex-start;
 }
 
-.other-player-editing {
-  border: 2px solid var(--player-color) !important;
+#quiz-controls-holder {
+  height: unset !important;
+}
+
+#answer-box-holder {
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: row;
+  gap: 1rem;
+}
+
+.other-player-input {
+  border-color: rgba(var(--player-color-rgb), 0.5) !important;
+}
+
+.other-player-editing:not(.correct):not(.incorrect) {
+  outline: 2px solid var(--player-color);
 }
 
 .other-player-answered {
-  background-color: rgba(var(--player-color-rgb), 0.25) !important;
+  outline: 1px dashed rgba(var(--player-color-rgb), 0.5);
 }
 
 .player-0 {

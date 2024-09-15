@@ -4,7 +4,7 @@ import { Server } from 'socket.io'
 import fs from 'fs'
 import path from 'path'
 import QuizRoom, { Player } from './types/quiz-room'
-import { SubmitAnswerC2S, AnswerSubmittedS2C, ChangeFieldC2S, FieldChangedS2C, ChangeInputC2S, InputChangedS2C, PlayerJoinedS2C, RoomJoinedS2C, SocketEvents, PlayerLeftS2C, WrongQuizUrlS2C } from './types/socket-types'
+import { SubmitAnswerC2S, AnswerSubmittedS2C, ChangeFieldC2S, FieldChangedS2C, ChangeInputC2S, InputChangedS2C, PlayerJoinedS2C, RoomJoinedS2C, SocketEvents, PlayerLeftS2C, WrongQuizUrlS2C, QuizChangedS2C } from './types/socket-types'
 
 import { config as configDotenv } from 'dotenv'
 configDotenv()
@@ -24,7 +24,10 @@ app.get('/join-room/:roomId', (req: any, res: any) => {
 
   fs.readFile(path.join(__dirname, 'pages/join-room.html'), 'utf8', (err, data) => {
     if (err) return console.log(err)
-    res.send(data.replace(/ROOM_ID/g, roomId))
+    res.send(data
+      .replace(/ROOM_ID/g, roomId)
+      .replace(/VERSION_NUMBER/g, process.env.VERSION_NUMBER || '0.0.0')
+    )
   })
 })
 
@@ -34,7 +37,10 @@ app.get('/client/index.user.js', (_req: any, res: any) => {
     if (err) return console.log(err)
 
     res.setHeader('Content-Type', 'text/javascript')
-    res.send(data.replace(/SERVER_URL/g, process.env.SERVER_URL || 'http://localhost:3000'))
+    res.send(data
+      .replace(/SERVER_URL/g, process.env.SERVER_URL || 'http://localhost:3000')
+      .replace(/VERSION_NUMBER/g, process.env.VERSION_NUMBER || '0.0.0')
+    )
   })
 })
 
@@ -52,10 +58,11 @@ io.use((socket, next) => {
   const id = socket.handshake.query.id as string
   const username = socket.handshake.query.username as string
   const quizUrl = socket.handshake.query.quizUrl as string
+  const changeQuizUrl = socket.handshake.query.changeQuizUrl === true.toString()
   const roomId = socket.handshake.query.roomId as string
 
   if (!id || !username || !quizUrl || !roomId) return next(new Error('Missing query parameters'))
-  if (quizzes[roomId]?.inGame) return next(new Error('Room is already in a game'))
+  if (quizzes[roomId]?.inGame && !changeQuizUrl) return next(new Error('Room is already in a game'))
 
   next()
 })
@@ -69,15 +76,29 @@ io.on('connection', socket => {
   const id = socket.handshake.query.id as string
   const username = socket.handshake.query.username as string
   const quizUrl = socket.handshake.query.quizUrl as string
+  const changeQuizUrl = socket.handshake.query.changeQuizUrl === true.toString()
   const roomId = socket.handshake.query.roomId as string
 
-  if (quizzes[roomId] && quizzes[roomId].quizUrl !== quizUrl) {
-    socket.emit(SocketEvents.S2C.WRONG_QUIZ_URL, { quizUrl: quizzes[roomId].quizUrl } as WrongQuizUrlS2C)
-    return socket.disconnect()
+  if (quizzes[roomId]) {
+    if (changeQuizUrl) {
+      console.log(`User ${username} changed quiz URL to ${quizUrl}`)
+      if (quizzes[roomId].inGame) socket.to(roomId).emit(SocketEvents.S2C.QUIZ_ENDED)
+  
+      quizzes[roomId].inGame = false
+      quizzes[roomId].quizUrl = quizUrl
+      quizzes[roomId].answers = []
+  
+      socket.to(roomId).emit(SocketEvents.S2C.QUIZ_CHANGED, { quizUrl: quizzes[roomId].quizUrl } as QuizChangedS2C)
+    } else if (quizzes[roomId].quizUrl !== quizUrl) {
+      socket.emit(SocketEvents.S2C.WRONG_QUIZ_URL, { quizUrl: quizzes[roomId].quizUrl } as WrongQuizUrlS2C)
+      return socket.disconnect()
+    }
   }
   
   socket.join(roomId)
-  if (!quizzes[roomId]) quizzes[roomId] = {
+
+  const newRoom = quizzes[roomId] === undefined
+  if (newRoom) quizzes[roomId] = {
     inGame: false,
     players: {},
     quizUrl: quizUrl,
@@ -89,12 +110,12 @@ io.on('connection', socket => {
   quizzes[roomId].players[id].connected = true
 
   // Update client
-  socket.emit(SocketEvents.S2C.ROOM_JOINED, { room: quizzes[roomId] } as RoomJoinedS2C)
+  socket.emit(SocketEvents.S2C.ROOM_JOINED, { isNewRoom: newRoom, room: quizzes[roomId] } as RoomJoinedS2C)
 
   // Notify all players
   io.to(roomId).emit(SocketEvents.S2C.PLAYER_JOINED, { id, username } as PlayerJoinedS2C)
 
-  console.log(`User ${username} (${id}) connected to room ${roomId}`)
+  console.log(`User ${username} connected to room ${roomId}`)
 
   socket.on(SocketEvents.C2S.START_QUIZ, _msg => {
     if (!roomId) return console.log(`${username} is not in a room`)
@@ -159,6 +180,8 @@ io.on('connection', socket => {
 
   socket.on(SocketEvents.C2S.END_QUIZ, _msg => {
     if (!roomId) return console.log(`${username} is not in a room`)
+
+    quizzes[roomId].inGame = false
 
     // Notify other players
     socket.to(roomId).emit(SocketEvents.S2C.QUIZ_ENDED)

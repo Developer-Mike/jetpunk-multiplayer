@@ -15,6 +15,7 @@ export const SocketEvents = {
     WRONG_QUIZ_URL: 'wrong-quiz-url',
     ROOM_JOINED: 'room-joined',
     PLAYER_JOINED: 'player-joined',
+    QUIZ_CHANGED: 'quiz-changed',
     QUIZ_STARTED: 'quiz-started',
     FIELD_CHANGED: 'field-changed',
     INPUT_CHANGED: 'input-changed',
@@ -37,12 +38,17 @@ export interface JoinRoomC2S {
 }
 
 export interface RoomJoinedS2C {
+  isNewRoom: boolean
   room: QuizRoom
 }
 
 export interface PlayerJoinedS2C {
   id: string
   username: string
+}
+
+export interface QuizChangedS2C {
+  quizUrl: string
 }
 
 export interface ChangeFieldC2S {

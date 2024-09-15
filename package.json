@@ -9,7 +9,7 @@
     "socket.io": "^4.7.5"
   },
   "scripts": {
-    "dev": "npx nodemon -L --watch src/ --exec cmd /c \"npm run win-build && npm run start\"",
+    "dev": "npx nodemon --watch src/ --ext ts,js,css --exec cmd /c \"npm run win-build && npm run start\"",
     "win-build": "npx tsc && post-build.bat",
     "build": "npx tsc && ./post-build.sh",
     "start": "node dist/index.js"

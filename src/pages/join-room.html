@@ -13,7 +13,7 @@
         <h1>Install JetPunk Multiplayer</h1>
         <p>Follow the steps below to install the JetPunk Multiplayer script (You only need to do this once)</p>
 
-        <ul>
+        <ol id="instruction-steps">
             <li>
                 Install the "Tampermonkey" or "Userscripts" extension by clicking the button below
                 <a id="install-extension" target="_blank"><button>Install Extension</button></a>
@@ -26,7 +26,7 @@
                 Refresh the page or click the button below to join the room
                 <a href="https://jetpunk.com/join-room/ROOM_ID"><button>Join Room</button></a>
             </li>
-        </ul>
+        </ol>
     </main>
 
     <script>
@@ -48,7 +48,18 @@
         document.getElementById("install-extension").href = INSTALLATION_LINKS[browser]
 
         setTimeout(() => {
-            if (!window.isExtensionInstalled) return
+            const jetpunkMultiplayerVersion = window.jetpunkMultiplayerVersion
+
+            // Not installed
+            if (jetpunkMultiplayerVersion === undefined) return
+
+            // Outdated version
+            if (jetpunkMultiplayerVersion !== 'VERSION_NUMBER') {
+                document.querySelector('#instruction-steps > li:first-child')?.remove()
+                return
+            }
+
+            // Installed
             open("https://jetpunk.com/join-room/ROOM_ID", "_self")
         }, 100)
     </script>

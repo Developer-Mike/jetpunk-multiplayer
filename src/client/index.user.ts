@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jetpunk Multiplayer
 // @namespace    com.mike
-// @version      1.0
+// @version      VERSION_NUMBER
 // @description  Play Jetpunk quizzes together with your friends
 // @author       Developer-Mike
 // @icon         https://www.jetpunk.com/apple-touch-icon-152x152.png
@@ -22,6 +22,34 @@ declare var unsafeWindow: any
 declare var GM_getResourceText: (id: string) => string
 declare var GM_addStyle: (css: string) => void
 
+//#region Types
+interface ClientPlayer {
+  connected: boolean
+  username: string
+  currentAnswer: string
+  currentField: string | null
+}
+
+interface ClientAnswer {
+  fieldId: string | null
+  value: string
+  playerId: string
+}
+
+class ClientQuizRoom {
+  constructor(
+    public id: string,
+    public players: { [id: string]: ClientPlayer },
+    public answers: ClientAnswer[]
+  ) {}
+  
+  getPlayerStyleClass(id: string) {
+    return `player-${Object.keys(this.players).indexOf(id)}`
+  }
+}
+//#endregion
+
+//#region Generators
 function getId() {
   let id = localStorage.getItem('multiplayer-id') ?? ''
 
@@ -43,20 +71,41 @@ function getUsername() {
 
   return username
 }
+//#endregion
 
-function getPlayerIndex(room: any, id: string) {
-  return Object.keys(room.players).indexOf(id)
-}
+//#region Constants
+const ROOM_ID_KEY = 'room-id'
+const IS_NO_DELIBERATE_REDIRECT = 'no-deliberate-redirect'
+const MULTIPLAYER_BUTTON_CLASS = 'multiplayer-button'
+const OTHER_PLAYER_INPUT_CLASS = 'other-player-input'
 
-function getField(fieldId: string) {
-  return document.querySelector(`td > div[data-answer="${fieldId}"]:not(.photo)`)
-}
+//#region Helper Functions
+function getAllFields() { return document.querySelectorAll('tr [data-answer]:not(img):not(.photo):not(.photo-img)') }
+function getFieldById(fieldId?: string | null): HTMLElement | null { return fieldId ? document.querySelector(`tr [data-answer="${fieldId}"]:not(img):not(.photo):not(.photo-img)`) : null }
 
-function getActiveFieldId() {
+function getSelectedFieldId() {
   return document.querySelector('.highlighted[data-answer]')?.getAttribute('data-answer') || null
 }
 
-function showActiveRoom(roomId: string, room: any) {
+function updatePlayerInput(room: ClientQuizRoom, playerId: string) {
+  let playerInput = document.querySelector(`.${OTHER_PLAYER_INPUT_CLASS}.${room.getPlayerStyleClass(playerId)}`) as HTMLInputElement | null
+  if (room.players[playerId].connected === false) return playerInput?.remove()
+
+  if (!playerInput) {
+    playerInput = document.createElement('input')
+    playerInput.type = 'text'
+    playerInput.classList.add(OTHER_PLAYER_INPUT_CLASS, room.getPlayerStyleClass(playerId))
+    playerInput.readOnly = true
+
+    const container = document.querySelector('#answer-box-holder') as HTMLElement | null
+    container?.appendChild(playerInput)
+  }
+
+  playerInput.value = room.players[playerId].currentAnswer
+}
+//#endregion
+
+function createRoomDiv(room: ClientQuizRoom) {
   const roomDivContainer = document.querySelector('.quiz-container') as HTMLElement
   if (!roomDivContainer) return
 
@@ -69,14 +118,14 @@ function showActiveRoom(roomId: string, room: any) {
   shareButton.classList.add('bi', 'bi-share-fill')
   // copy room ID to clipboard
   shareButton.onclick = () => {
-    navigator.clipboard.writeText(`SERVER_URL/join-room/${roomId}`)
+    navigator.clipboard.writeText(`SERVER_URL/join-room/${room.id}`)
     shareButton.classList.replace('bi-share-fill', 'bi-check2')
     setTimeout(() => shareButton.classList.replace('bi-check2', 'bi-share-fill'), 500)
   }
   roomDiv.appendChild(shareButton)
 
   const roomHeader = document.createElement('h3')
-  roomHeader.textContent = `Room: ${roomId}`
+  roomHeader.textContent = `Room: ${room.id}`
   roomDiv.appendChild(roomHeader)
 
   const roomPlayers = document.createElement('div')
@@ -90,7 +139,7 @@ function showActiveRoom(roomId: string, room: any) {
       if (!player.connected) continue
 
       const playerDiv = document.createElement('div')
-      playerDiv.classList.add(`player-${getPlayerIndex(room, id)}`)
+      playerDiv.classList.add(room.getPlayerStyleClass(id))
       playerDiv.textContent = player.username
       roomPlayers.appendChild(playerDiv)
     }
@@ -99,7 +148,7 @@ function showActiveRoom(roomId: string, room: any) {
   updatePlayers()
   room.players = new Proxy(room.players, {
     set: (target, prop, value) => {
-      target[prop] = value
+      target[prop as string] = value
       updatePlayers()
       return true
     }
@@ -110,281 +159,273 @@ function showActiveRoom(roomId: string, room: any) {
   leaveButton.textContent = 'Leave room'
   leaveButton.onclick = () => {
     if (!confirm('Are you sure you want to leave the room?')) return
+
+    localStorage.removeItem(ROOM_ID_KEY)
     window.location.reload()
   }
   roomDiv.appendChild(leaveButton)
 }
 
-function setupServerMsgListeners(socket: any, room: any) {
+function setupCommunicationListeners(socket: any, room: ClientQuizRoom) {
+  const input = document.querySelector('#txt-answer-box') as HTMLInputElement
+  let inputCausedProgrammatically = false
+
+  const quizHasFields = getSelectedFieldId() !== null
+  let lastFieldId: string | null = null
+
   socket.on('player-joined', (data: { id: string, username: string }) => {
     room.players[data.id] = {
       connected: true,
       username: data.username, 
       currentAnswer: '', 
-      currentField: undefined
+      currentField: null
     }
   })
 
+  //#region Quiz Change
+  const retakeQuizButton = document.querySelector('#retake-quiz') as HTMLElement
+  retakeQuizButton?.addEventListener('click', _e => window.location.reload())
+  socket.on('quiz-changed', (data: { quizUrl: string }) => {
+    console.log(`Quiz change received: ${data.quizUrl}`)
+
+    localStorage.setItem(IS_NO_DELIBERATE_REDIRECT, true.toString())
+    window.location.pathname = data.quizUrl // Redirect to new quiz
+  })
+  //#endregion
+
+  //#region Quiz Start
+  const startButton = document.querySelector('#start-button') as HTMLButtonElement
+  startButton?.addEventListener('click', e => {
+    if (!e.isTrusted) return // Ignore programmatic clicks
+    socket.emit('start-quiz')
+  })
   socket.on('quiz-started', () => {
-    const startButton = document.querySelector('#start-button') as HTMLButtonElement
     startButton?.click()
 
-    room.players[getId()].currentField = getActiveFieldId()
-    if (room.players[getId()].currentField) socket.emit('change-field', { fieldId: room.players[getId()].currentField })
-  })
-
-  socket.on('field-changed', (data: { id: string, fieldId: string }) => {
-    console.log(`Field change received: ${data.fieldId}`)
-    const oldFieldId = room.players[data.id].currentField
-    room.players[data.id].currentField = data.fieldId
-
-    if (oldFieldId) {
-      const oldField = getField(oldFieldId)
-      if (oldField) {
-        oldField.classList.remove('other-player-editing')
-
-        if (!oldField.classList.contains('correct')) {
-          oldField.textContent = ''
-          oldField.classList?.remove(`player-${getPlayerIndex(room, data.id)}`)
-        }
-      }
+    // Update current local state and share with other players
+    if (quizHasFields) {
+      lastFieldId = getSelectedFieldId()
+      room.players[getId()].currentField = getSelectedFieldId()
+      socket.emit('change-field', { fieldId: room.players[getId()].currentField })
     }
 
-    const newField = getField(data.fieldId)
-    if (newField) {
-      newField.classList.add(`player-${getPlayerIndex(room, data.id)}`)
-      newField.classList.add('other-player-editing')
-    }
+    room.players[getId()].currentAnswer = input.value
+    socket.emit('change-input', { value: room.players[getId()].currentAnswer })
   })
+  //#endregion
+
+  //#region Field Change
+  if (quizHasFields) {
+    // Add an event listener to all fields when they are highlighted
+    getAllFields().forEach(field => {
+      new MutationObserver(() => {
+        if (!field.classList.contains('highlighted')) return
+
+        const fieldId = getSelectedFieldId()
+        if (room.players[getId()].currentField === fieldId) return // Field already selected (Shouldn't happen but just in case)
+
+        // Log field change
+        console.log(`Field changed to: ${fieldId}`)
+
+        // Keep track of the last field
+        lastFieldId = room.players[getId()].currentField
+
+        // Update current field
+        room.players[getId()].currentField = fieldId
+        socket.emit('change-field', { fieldId })
+      }).observe(field, { attributes: true, attributeFilter: ['class'] })
+    })
+
+    socket.on('field-changed', (data: { id: string, fieldId: string }) => {
+      console.log(`Field change received: ${data.fieldId}`)
+
+      // Remove other-player-editing indicator from old field
+      const oldField = getFieldById(room.players[data.id].currentField)
+      if (!oldField?.classList?.contains('correct')) oldField?.classList?.remove(room.getPlayerStyleClass(data.id)) // Only remove if not answered (Bc could interfere with other-player-answered order)
+      oldField?.classList?.remove('other-player-editing')
+
+      room.players[data.id].currentField = data.fieldId
+      
+      const newField = getFieldById(data.fieldId)
+      newField?.classList.add(room.getPlayerStyleClass(data.id))
+      newField?.classList.add('other-player-editing')
+    })
+  }
+  //#endregion
+
+  //#region Input Change
+  const updateInput = (e: KeyboardEvent | ClipboardEvent) => {
+    const futureInputValue = predictInputValue(e)
+    room.players[getId()].currentAnswer = futureInputValue.length > 0 ? futureInputValue : room.players[getId()].currentAnswer
+
+    console.log(`Input changed to: ${futureInputValue}`)
+    socket.emit('change-input', { value: futureInputValue })
+  }
+  input.addEventListener('keydown', updateInput)
+  input.addEventListener('paste', updateInput)
 
   socket.on('input-changed', (data: { id: string, value: string }) => {
     console.log(`Input change received: ${data.value}`)
-    room.players[data.id].currentAnswer = data.value
 
-    const field = getField(room.players[data.id].currentField)
-    if (field !== null) field.textContent = data.value
+    room.players[data.id].currentAnswer = data.value
+    updatePlayerInput(room, data.id)
   })
+  //#endregion
+
+  //#region Answer Submission
+  const numGuessedDiv = document.querySelector('#num-guessed') as HTMLElement
+  new MutationObserver(() => {
+    if (inputCausedProgrammatically) {
+      inputCausedProgrammatically = false
+      return // Caused by programmatic input
+    }
+
+    const newAnswer = { fieldId: lastFieldId, value: room.players[getId()].currentAnswer, playerId: getId() }
+    console.log(`Answer submitted: ${newAnswer.value}`)
+
+    // Update local state
+    room.players[getId()].currentAnswer = ''
+    room.answers.push(newAnswer)
+
+    // Share answer and input change with other players
+    socket.emit('submit-answer', { fieldId: newAnswer.fieldId, answer: newAnswer.value })
+    socket.emit('change-input', { value: room.players[getId()].currentAnswer })
+  }).observe(numGuessedDiv, { childList: true })
 
   socket.on('answer-submitted', (data: { id: string, fieldId: string | undefined, answer: string }) => {
     console.log(`Answer received: ${data.answer}`)
-    room.answers.push({ fieldId: data.fieldId, value: data.answer, playerId: data.id })
 
-    const input = document.querySelector('#txt-answer-box') as HTMLInputElement
-    if (!input) return
+    // Update local state
+    room.answers.push({ fieldId: data.fieldId ?? null, value: data.answer, playerId: data.id })
 
-    const oldFieldId = getActiveFieldId()
-    const oldValue = input.value
+    // Save current input state
+    const ownFieldId = getSelectedFieldId()
+    const ownInputValue = input.value
+
+    // Disable local listeners
+    inputCausedProgrammatically = true
 
     if (data.fieldId) {
-      const field = getField(data.fieldId) as HTMLElement
+      const field = getFieldById(data.fieldId) as HTMLElement
       field?.click()
 
       // Add tinted background to field to indicate who answered
-      field.classList.add(`player-${getPlayerIndex(room, data.id)}`)
+      field.classList.add(room.getPlayerStyleClass(data.id))
       field.classList.add('other-player-answered')
     }
 
-    input.dataset.isMultiplayer = 'true'
     input.value = data.answer
     input.dispatchEvent(new Event('input'))
-    input.dataset.isMultiplayer = 'false'
-    console.log(`Answer entered: ${data.answer}`)
 
-    // Restore position
-    if (data.fieldId && oldFieldId) {
-      // Player was on the same field
-      if (oldFieldId === data.fieldId) {
-        room.players[getId()].currentField = getActiveFieldId()
-        socket.emit('change-field', { fieldId: room.players[getId()].currentField })
-      } else {
-        const oldField = getField(oldFieldId) as HTMLElement
-        oldField?.click()
-      }
-    }
-
-    input.value = oldValue
+    // Restore old field and input value
+    if (ownFieldId && ownFieldId !== data.fieldId) getFieldById(ownFieldId)?.click()
+    input.value = ownInputValue
     input.dispatchEvent(new Event('input'))
   })
+  //#endregion
 
-  socket.on('quiz-paused', () => {
-    const pauseButton = document.querySelector('.pause-quiz') as HTMLButtonElement
-    pauseButton?.click()
-  })
+  //#region Quiz Pause
+  const pauseButton = document.querySelector('.pause-quiz') as HTMLElement
+  pauseButton?.addEventListener('click', e => { if (e.isTrusted) socket.emit('pause-quiz') })
+  socket.on('quiz-paused', () => pauseButton?.click())
+  //#endregion
 
-  socket.on('quiz-unpaused', () => {
-    const unpauseButton = document.querySelector('.unpause-quiz') as HTMLButtonElement
-    unpauseButton?.click()
-  })
+  //#region Quiz Unpause
+  const unpauseButton = document.querySelector('.unpause-quiz') as HTMLButtonElement
+  unpauseButton?.addEventListener('click', e => { if (e.isTrusted) socket.emit('unpause-quiz') })
+  socket.on('quiz-unpaused', () => unpauseButton?.click())
+  //#endregion
 
-  socket.on('on-unlimited-time-enabled', () => {
-    const unlimitedTimeButton = document.querySelector('.stop-timer') as HTMLButtonElement
-    unlimitedTimeButton?.click()
-  })
+  //#region Unlimited Time
+  const unlimitedTimeButton = document.querySelector('.stop-timer') as HTMLElement
+  unlimitedTimeButton?.addEventListener('click', e => { if (e.isTrusted) socket.emit('unlimited-time-enabled') })
+  socket.on('on-unlimited-time-enabled', () => unlimitedTimeButton?.click())
+  //#endregion
+
+  //#region Quiz End
+  const endButton = document.querySelector('.give-up') as HTMLButtonElement
+  endButton?.addEventListener('click', e => { if (e.isTrusted) socket.emit('end-quiz') })
+
+  const timer = document.querySelector('.timer') as HTMLElement
+  new MutationObserver(() => {
+    if (timer.textContent === "00:00") socket.emit('end-quiz')
+  }).observe(timer, { childList: true })
 
   socket.on('quiz-ended', () => {
-    room.inGame = false
-
-    const timer = document.querySelector('.timer') as HTMLElement
     if (timer.textContent?.match(/00:0[0123]/)) return // Quiz will end by itself
-
-    const endButton = document.querySelector('.give-up') as HTMLButtonElement
     endButton?.click()
   })
+  //#endregion
 
   socket.on('player-left', (data: { id: string }) => {
     room.players[data.id] = {
       ...room.players[data.id],
       connected: false
     }
+
+    // Remove corresponding player input
+    updatePlayerInput(room, data.id)
   })
 }
 
-function setupUserEventListeners(socket: any, room: any) {
-  let currentAnswer: string = (document.querySelector('#txt-answer-box') as HTMLInputElement).value
-  let lastFieldId: string | null = getActiveFieldId()
-  room.players[getId()].currentField = getActiveFieldId()
 
-  const startButton = document.querySelector('#start-button') as HTMLButtonElement
-  startButton?.addEventListener('click', e => {
-    if (!e.isTrusted) return // Ignore programmatic clicks
+function joinRoom(roomId: string | null, onlyJoin = false) {
+  if (!roomId) return
 
-    socket.emit('start-quiz')
-  })
+  const changeQuizUrl = localStorage.getItem(IS_NO_DELIBERATE_REDIRECT) !== true.toString()
+  // Set all redirects to deliberate
+  localStorage.setItem(IS_NO_DELIBERATE_REDIRECT, false.toString())
 
-  if (room.players[getId()].currentField) {
-    const fieldElements = document.querySelectorAll('td > div[data-answer]:not(.photo)')
-    fieldElements.forEach(field => {
-      new MutationObserver(() => {
-        if (!field.classList.contains('highlighted')) return
-
-        const fieldId = getActiveFieldId()
-        if (room.players[getId()].currentField === fieldId) return
-
-        lastFieldId = room.players[getId()].currentField
-
-        room.players[getId()].currentField = fieldId
-        console.log(`Field changed to: ${fieldId}`)
-        socket.emit('change-field', { fieldId })
-      }).observe(field, { attributes: true, attributeFilter: ['class'] })
-    })
-  }
-
-  const input = document.querySelector('#txt-answer-box') as HTMLInputElement
-  input.addEventListener('input', e => {
-    if (!e.isTrusted) return // Ignore programmatic input
-  })
-  const updateInput = (e: KeyboardEvent | ClipboardEvent) => {
-    const futureInputValue = predictInputValue(e)
-    currentAnswer = futureInputValue.length > 0 ? futureInputValue : currentAnswer
-
-    console.log(`Input changed to: ${futureInputValue}`)
-    socket.emit('change-input', { value: futureInputValue })
-  }
-  input.addEventListener('keydown', e => {
-    if (!e.isTrusted) return // Ignore programmatic input
-    updateInput(e)
-  })
-  input.addEventListener('paste', e => {
-    if (!e.isTrusted) return // Ignore programmatic input
-    updateInput(e)
-  })
-
-  const numGuessedDiv = document.querySelector('#num-guessed') as HTMLElement
-  new MutationObserver(() => {
-    if (input.dataset.isMultiplayer === 'true') return // Caused by programmatic input
-
-    console.log(`Answer submitted: ${currentAnswer}`)
-    socket.emit('submit-answer', { fieldId: lastFieldId, answer: currentAnswer })
-    room.answers.push({ fieldId: lastFieldId, value: currentAnswer, playerId: getId() })
-
-    currentAnswer = ''
-    socket.emit('change-input', { value: currentAnswer })
-  }).observe(numGuessedDiv, { childList: true })
-
-  const pauseButton = document.querySelector('.pause-quiz') as HTMLElement
-  pauseButton?.addEventListener('click', e => {
-    if (!e.isTrusted) return // Ignore programmatic clicks
-
-    socket.emit('pause-quiz')
-  })
-
-  const unpauseButton = document.querySelector('.unpause-quiz') as HTMLButtonElement
-  unpauseButton?.addEventListener('click', e => {
-    if (!e.isTrusted) return // Ignore programmatic clicks
-
-    socket.emit('unpause-quiz')
-  })
-
-  const unlimitedTimeButton = document.querySelector('.stop-timer') as HTMLElement
-  unlimitedTimeButton?.addEventListener('click', e => {
-    if (!e.isTrusted) return // Ignore programmatic clicks
-
-    socket.emit('unlimited-time-enabled')
-  })
-
-  const endButton = document.querySelector('.give-up') as HTMLElement
-  endButton?.addEventListener('click', e => {
-    if (!e.isTrusted) return // Ignore programmatic clicks
-
-    socket.emit('end-quiz')
-  })
-
-  const timer = document.querySelector('.timer') as HTMLElement
-  new MutationObserver(() => {
-    if (timer.textContent === "00:00") socket.emit('end-quiz')
-  }).observe(timer, { childList: true })
-}
-
-function multiplayer(onlyRedirect: boolean, onSuccess?: () => void) {
-  const roomId = localStorage.getItem('auto-join-room') ?? prompt('Enter room ID')
-  if (roomId === null) return
-
-  let room = {
-    players: {} as any,
-    answers: [] as any,
-  } as any
-  
-  const socket = io("SERVER_URL", { query: { id: getId(), username: getUsername(), quizUrl: window.location.pathname, roomId } })
+  const socket = io("SERVER_URL", { query: { 
+    id: getId(), 
+    username: getUsername(), 
+    quizUrl: window.location.pathname,
+    changeQuizUrl: changeQuizUrl,
+    roomId: roomId
+  } })
 
   // Listeners
   socket.on('connect', () => {
+    console.log('Connected to server')
+
+    const room = new ClientQuizRoom(roomId, {}, [])
+    localStorage.setItem(ROOM_ID_KEY, roomId)
+
     socket.on('wrong-quiz-url', (data: { quizUrl: string }) => {
-      localStorage.setItem('auto-join-room', roomId)
+      localStorage.setItem(IS_NO_DELIBERATE_REDIRECT, true.toString())
       window.location.pathname = data.quizUrl
     })
     
-    socket.on('room-joined', (data: { room: any }) => {
-      // Remove auto-join room
-      localStorage.removeItem('auto-join-room')
-
+    socket.on('room-joined', (data: { newRoom: boolean, room: any }) => {
       // Don't allow room creation if it's not allowed
-      if (!onlyRedirect) return socket.disconnect()
+      if (onlyJoin && data.newRoom) return socket.disconnect()
 
       // Update room without loosing proxy
       for (const [id, player] of Object.entries(data.room.players) as [string, any][]) {
         room.players[id] = player
       }
 
-      showActiveRoom(roomId, room)
-      setupServerMsgListeners(socket, room)
-      setupUserEventListeners(socket, room)
+      createRoomDiv(room)
+      setupCommunicationListeners(socket, room)
       
-      onSuccess?.()
+      // Update UI
+      document.querySelector(`.${MULTIPLAYER_BUTTON_CLASS}`)?.remove()
+      document.querySelector('#start-button')?.querySelector('i')?.classList?.replace('bi-play-fill', 'bi-cloud-fill')
     })
   })
 }
 
 function injectQuizPage() {
   const startButtonContainer = document.querySelector('#start-button-holder')
-  const startButton = document.querySelector('#start-button')
 
   const multiplayerButton = document.createElement('button')
   multiplayerButton.id = 'start-button'
+  multiplayerButton.classList.add(MULTIPLAYER_BUTTON_CLASS)
   multiplayerButton.classList.add('green')
-  multiplayerButton.onclick = () => multiplayer(true, () => {
-    multiplayerButton.remove()
-    startButton?.querySelector('i')?.classList?.replace('bi-play-fill', 'bi-cloud-fill')
-  })
+  multiplayerButton.onclick = () => {
+    localStorage.setItem(IS_NO_DELIBERATE_REDIRECT, true.toString())
+    joinRoom(prompt('Enter room ID'))
+  }
 
   const buttonSpan = document.createElement('span')
   buttonSpan.textContent = 'Multiplayer'
@@ -395,26 +436,44 @@ function injectQuizPage() {
   multiplayerButton.appendChild(buttonIcon)
 
   startButtonContainer?.appendChild(multiplayerButton)
-
-  return multiplayerButton
 }
 
 function injectHomePage() {
-  const multiplayerButton = document.createElement('button')
-  multiplayerButton.classList.add('green')
-  multiplayerButton.style.marginTop = '20px'
-  multiplayerButton.onclick = () => multiplayer(false)
-
-  const buttonSpan = document.createElement('span')
-  buttonSpan.textContent = 'Join room'
-  multiplayerButton.appendChild(buttonSpan)
-
-  const buttonIcon = document.createElement('i')
-  buttonIcon.classList.add('bi', 'bi-cloud-fill')
-  multiplayerButton.appendChild(buttonIcon)
-
   const dailyQuizzesContainer = document.querySelector('.date') as HTMLElement
-  dailyQuizzesContainer?.prepend(multiplayerButton)
+
+  if (localStorage.getItem(ROOM_ID_KEY)) {
+    const leaveButton = document.createElement('button')
+    leaveButton.id = 'leave-room-button'
+    leaveButton.classList.add('red')
+    leaveButton.textContent = 'Leave room'
+    leaveButton.onclick = () => {
+      localStorage.removeItem(ROOM_ID_KEY)
+      window.location.reload()
+    }
+    dailyQuizzesContainer?.prepend(leaveButton)
+  } else {
+    const multiplayerButton = document.createElement('button')
+    multiplayerButton.id = 'join-room-button'
+    multiplayerButton.classList.add('green')
+    multiplayerButton.onclick = () => {
+      const roomId = prompt('Enter room ID')
+      if (!roomId) return
+
+      localStorage.setItem(ROOM_ID_KEY, roomId)
+      localStorage.setItem(IS_NO_DELIBERATE_REDIRECT, true.toString())
+      joinRoom(roomId, true)
+    }
+
+    const buttonSpan = document.createElement('span')
+    buttonSpan.textContent = 'Join room'
+    multiplayerButton.appendChild(buttonSpan)
+
+    const buttonIcon = document.createElement('i')
+    buttonIcon.classList.add('bi', 'bi-cloud-fill')
+    multiplayerButton.appendChild(buttonIcon)
+
+    dailyQuizzesContainer?.prepend(multiplayerButton)
+  }
 }
 
 (function() {
@@ -422,7 +481,7 @@ function injectHomePage() {
 
     // If on SERVER_URL/join-room/*
     if (window.location.hostname === 'SERVER_URL'.split('//').pop()?.split(':').shift()?.split('/').pop()) {
-      unsafeWindow.isExtensionInstalled = true
+      unsafeWindow.jetpunkMultiplayerVersion = 'VERSION_NUMBER'
       return
     }
 
@@ -430,21 +489,25 @@ function injectHomePage() {
     GM_addStyle(css)
 
     // Page is /quizzes/id or /user-quizzes/num/id
-    if (window.location.pathname.match(/\/quizzes\/[a-z0-9-]+$/) || window.location.pathname.match(/\/user-quizzes\/\d+\/[a-z0-9-]+$/)) {
-      const multiplayerButton = injectQuizPage()
-      if (localStorage.getItem('auto-join-room') !== null) multiplayerButton.click() // Auto-join room
-    } else if (window.location.pathname.match(/\/([a-z]{2})?$/)) injectHomePage()
-    else if (window.location.pathname.match(/\/join-room\/[^\/]+$/)) {
+    if (window.location.pathname.match(/\/quizzes\/[a-z0-9-\/]+$/) || window.location.pathname.match(/\/user-quizzes\/\d+\/[a-z0-9-\/]+$/)) {
+      injectQuizPage()
+
+      const roomId = localStorage.getItem(ROOM_ID_KEY)
+      if (roomId) joinRoom(roomId)
+    } else if (window.location.pathname.match(/\/([a-z]{2})?$/)) {
+      injectHomePage()
+    } else if (window.location.pathname.match(/\/join-room\/[^\/]+$/)) {
       const roomId = window.location.pathname.split('/').pop()
       if (!roomId) return
 
-      localStorage.setItem('auto-join-room', roomId)
-      multiplayer(false)
+      localStorage.setItem(ROOM_ID_KEY, roomId)
+      localStorage.setItem(IS_NO_DELIBERATE_REDIRECT, true.toString())
+      joinRoom(roomId, true)
     }
 })()
 
 // Predict input value inspired by wojtekmaj/predict-input-value (MIT License, Modified)
-const excludeList = ['Alt', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Enter', 'Escape', 'Shift', 'Tab']
+const excludeList = ['Alt', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Enter', 'Escape', 'Shift', 'Tab', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12']
 function predictInputValue(event: KeyboardEvent | ClipboardEvent) {
   const target = event.target as HTMLElement
 
